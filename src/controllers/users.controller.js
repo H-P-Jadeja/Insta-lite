@@ -1,4 +1,5 @@
 const usersService = require('../services/users.service');
+const { parsePagination, formatPaginationMeta } = require('../utils/pagination');
 
 async function create(req, res) {
   try {
@@ -30,8 +31,61 @@ async function create(req, res) {
 
 async function list(req, res) {
   try {
-    const users = await usersService.listUsers();
-    return res.status(200).json(users);
+    const pagination = parsePagination(req.query);
+    if (pagination.error) {
+      return res.status(400).json({ error: pagination.error });
+    }
+
+    const { sortBy = 'createdAt', order = 'desc', isPrivate, search, hasPosts } = req.query;
+
+    const allowedSortBy = ['createdAt', 'username', 'fullname'];
+    if (!allowedSortBy.includes(sortBy)) {
+      return res.status(400).json({
+        error: 'sortBy must be one of: createdAt, username, fullname',
+      });
+    }
+
+    const allowedOrder = ['asc', 'desc'];
+    if (!allowedOrder.includes(order)) {
+      return res.status(400).json({
+        error: 'order must be asc or desc',
+      });
+    }
+
+    let parsedIsPrivate;
+    if (isPrivate !== undefined) {
+      if (isPrivate !== 'true' && isPrivate !== 'false') {
+        return res.status(400).json({
+          error: 'isPrivate must be true or false',
+        });
+      }
+      parsedIsPrivate = isPrivate === 'true';
+    }
+
+    let parsedHasPosts;
+    if (hasPosts !== undefined) {
+      if (hasPosts !== 'true' && hasPosts !== 'false') {
+        return res.status(400).json({
+          error: 'hasPosts must be true or false',
+        });
+      }
+      parsedHasPosts = hasPosts === 'true';
+    }
+
+    const { data, total } = await usersService.listUsers({
+      skip: pagination.skip,
+      limit: pagination.limit,
+      sortBy,
+      order,
+      isPrivate: parsedIsPrivate,
+      search: search ? search.trim() : undefined,
+      hasPosts: parsedHasPosts,
+    });
+
+    return res.status(200).json({
+      data,
+      meta: formatPaginationMeta(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
@@ -81,10 +135,62 @@ async function remove(req, res) {
   }
 }
 
+async function getUserPosts(req, res) {
+  try {
+    const pagination = parsePagination(req.query);
+    if (pagination.error) {
+      return res.status(400).json({ error: pagination.error });
+    }
+
+    const result = await usersService.getUserPosts(req.params.id, {
+      skip: pagination.skip,
+      limit: pagination.limit,
+    });
+
+    if (!result) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    return res.status(200).json({
+      data: result.data,
+      meta: formatPaginationMeta(result.total, pagination.page, pagination.limit),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+}
+
+async function getLikedPosts(req, res) {
+  try {
+    const pagination = parsePagination(req.query);
+    if (pagination.error) {
+      return res.status(400).json({ error: pagination.error });
+    }
+
+    const result = await usersService.getUserLikedPosts(req.params.id, {
+      skip: pagination.skip,
+      limit: pagination.limit,
+    });
+
+    if (!result) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    return res.status(200).json({
+      data: result.data,
+      meta: formatPaginationMeta(result.total, pagination.page, pagination.limit),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+}
+
 module.exports = {
   create,
   list,
   getOne,
   update,
   remove,
+  getUserPosts,
+  getLikedPosts,
 };

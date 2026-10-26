@@ -1,20 +1,31 @@
 const postsService = require('../services/posts.service');
+const { parsePagination, formatPaginationMeta } = require('../utils/pagination');
 
 async function create(req, res) {
   try {
-    const { imageUrl, caption, location } = req.body || {};
+    const { imageUrl, authorId, caption, location } = req.body || {};
 
-    if (!imageUrl) {
-      return res.status(400).json({ error: 'imageUrl is required' });
+    if (!imageUrl || authorId === undefined || authorId === null) {
+      return res.status(400).json({ error: 'imageUrl and authorId are required' });
     }
 
-    const post = await postsService.createPost({
+    const numericAuthorId = Number(authorId);
+    if (isNaN(numericAuthorId)) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const result = await postsService.createPost({
       imageUrl,
+      authorId: numericAuthorId,
       caption,
       location,
     });
 
-    return res.status(201).json(post);
+    if (result.notFound) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    return res.status(201).json(result.post);
   } catch (error) {
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
@@ -22,8 +33,51 @@ async function create(req, res) {
 
 async function list(req, res) {
   try {
-    const posts = await postsService.listPosts();
-    return res.status(200).json(posts);
+    const pagination = parsePagination(req.query);
+    if (pagination.error) {
+      return res.status(400).json({ error: pagination.error });
+    }
+
+    const { sortBy = 'createdAt', order = 'desc', location, search, from, to } = req.query;
+
+    const allowedSortBy = ['createdAt', 'updatedAt', 'likes'];
+    if (!allowedSortBy.includes(sortBy)) {
+      return res.status(400).json({
+        error: 'sortBy must be one of: createdAt, updatedAt, likes',
+      });
+    }
+
+    const allowedOrder = ['asc', 'desc'];
+    if (!allowedOrder.includes(order)) {
+      return res.status(400).json({
+        error: 'order must be asc or desc',
+      });
+    }
+
+    const isValidDate = (d) => {
+      const parsed = new Date(d);
+      return !isNaN(parsed.getTime());
+    };
+
+    if ((from !== undefined && !isValidDate(from)) || (to !== undefined && !isValidDate(to))) {
+      return res.status(400).json({ error: 'from and to must be valid dates' });
+    }
+
+    const { data, total } = await postsService.listPosts({
+      skip: pagination.skip,
+      limit: pagination.limit,
+      sortBy,
+      order,
+      location: location ? location.trim() : undefined,
+      search: search ? search.trim() : undefined,
+      from,
+      to,
+    });
+
+    return res.status(200).json({
+      data,
+      meta: formatPaginationMeta(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
